@@ -19,12 +19,10 @@ ShowList = on_regex(r"^/chat\s+list\s*$")  # 展示群聊天列表
 Join = on_regex(r"^/chat\s+join\s+\d+")  # 加入对话
 Delete = on_regex(r"^/chat\s+delete\s+\d+")  # 删除对话
 Dump = on_regex(r"^/chat\s+dump$")  # 导出json
-CreateConversationWithPrompt = on_regex(
-    r"^/chat\s+create\s+.+$")  # 利用自定义prompt创建对话
 CreateConversationWithTemplate = on_regex(r"^/chat\s+create$")  # 利用模板创建对话
 CreateConversationWithJson = on_regex(r"^/chat\s+json$")  # 利用json创建对话
 
-groupPanels: Dict[int:GroupPanel] = {}
+groupPanels = {}
 privateConversations: Dict[int, Conversation] = {}
 
 
@@ -106,49 +104,17 @@ async def _(event: Event):
 @CallMenu.handle()
 async def _(bot: Bot, event: Event):
     menu: str = (
-        "太长不看版:\n"
-        + "先用/chat create命令,选择模板来创建对话,随后/talk 内容 来对话\n\n"
+        "使用方法:\n"
+        + "先用/chat create命令,选择模板来创建上下文,随后/talk 内容 来对话\n\n"
         + "/chat :获取菜单\n"
-        + "/chat create :利用模板创建一个对话并加入\n"
-        + "/talk <内容> :在当前的对话进行聊天"
+        + "/chat create :创建一个上下文并加入\n"
+        + "/talk <内容> :在当前的上下文进行聊天\n\n剩余部分非必要不使用:\n"
         + "/chat list :获得当前已创建的对话列表\n"
-        + "/chat join 序号(指/chat list中的序号) :参与list中的某个对话\n"
-        + "/chat create (prompt) :自定义prompt来创建一个新的对话\n"
-        + "/chat delete 序号(指/chat list中的序号) :删除list中的某个对话\n"
-        + "/chat dump :导出当前对话的历史记录json"
+        + "/chat join 序号(指/chat list中的序号) :参与list中的某个上下文\n"
+        + "/chat delete 序号(指/chat list中的序号) :删除list中的某个上下文\n"
+        + "/chat dump :导出当前上下文的历史记录json"
     )
     await CallMenu.finish(menu, at_sender=True)
-
-
-@Delete.handle()
-async def _(event: Event):
-    msg = event.get_plaintext()
-    msg = re.sub(r"^/chat\s+delete\s+", '', msg)
-    id = int(msg)
-    if isinstance(event, GroupMessageEvent):
-        groupPanel = groupPanels.get(event.group_id)
-        if not groupPanel:
-            await Join.finish("本群尚未创建过对话!", at_sender=True)
-        if id < 1 or id > len(groupPanel.conversations):
-            await Join.finish("序号超出!", at_sender=True)
-        userId = event.get_user_id()
-        if groupPanel.conversations[id-1].owner.id == userId:
-            conver = groupPanel.conversations[id-1]
-            jointUser: List[int] = []
-            for user, conversation in groupPanel.userInConversation.items():
-                if conver == conversation:
-                    jointUser.append(user)
-            for user in jointUser:
-                groupPanel.userInConversation.pop(user)
-
-            groupPanel.conversations.pop(id-1)
-            await Delete.finish("删除成功!")
-        else:
-            await Delete.finish("您不是该对话的创建者或管理员!")
-    else:
-        privateConversations.pop(event.get_user_id())
-        await Delete.finish("已删除当前对话")
-# 暂时已完成
 
 
 @ShowList.handle()
@@ -170,72 +136,116 @@ async def _(bot: Bot, event: Event):
 # 暂时完成
 
 
-@CreateConversationWithPrompt.handle()
-async def _(bot: Bot, event: Event):
-    msg = event.get_plaintext()
-    customPrompt: str = re.sub(r"^/chat\s+create\s*", '', msg)  # 获取用户自定义prompt
-    if customPrompt:
-        userID = event.get_user_id()
-        try:
-            newConversation = Conversation.CreateWithStr(
-                customPrompt, userID)
-        except NoApiKeyError:
-            await CreateConversationWithPrompt.finish("请机器人管理员在设置中添加APIKEY！")
-        if isinstance(event, GroupMessageEvent):  # 当在群聊中时
-            if not groupPanels.get(event.group_id):  # 没有时创建新的groupPanel
-                groupPanels[event.group_id] = GroupPanel()
-            groupPanels[event.group_id].conversations.append(newConversation)
-            groupPanels[event.group_id].userInConversation[userID] = newConversation
-            await CreateConversationWithPrompt.finish(f"创建成功!", at_sender=True)
+# @CreateConversationWithPrompt.handle()
+# async def _(bot: Bot, event: Event):
+#     msg = event.get_plaintext()
+#     customPrompt: str = re.sub(r"^/chat\s+create\s*", '', msg)  # 获取用户自定义prompt
+#     if customPrompt:
+#         userID = event.get_user_id()
+#         try:
+#             newConversation = Conversation.CreateWithStr(
+#                 customPrompt, userID)
+#         except NoApiKeyError:
+#             await CreateConversationWithPrompt.finish("请机器人管理员在设置中添加APIKEY！")
+#         if isinstance(event, GroupMessageEvent):  # 当在群聊中时
+#             if not groupPanels.get(event.group_id):  # 没有时创建新的groupPanel
+#                 groupPanels[event.group_id] = GroupPanel()
+#             groupPanels[event.group_id].conversations.append(newConversation)
+#             groupPanels[event.group_id].userInConversation[userID] = newConversation
+#             await CreateConversationWithPrompt.finish(f"创建成功!", at_sender=True)
 
-        elif isinstance(event, PrivateMessageEvent):  # 当在私聊中时
-            if privateConversations[userID]:
-                await CreateConversationWithPrompt.finish("已存在一个对话,请先删除")
-            else:
-                privateConversations[userID] = Conversation.CreateWithStr(
-                    customPrompt, userID)
-                await CreateConversationWithPrompt.finish(f"用户{str(userID)}创建成功")
-    else:  # 若prompt全为空
-        await CreateConversationWithPrompt.finish("输入prompt不能为空格!")
+#         elif isinstance(event, PrivateMessageEvent):  # 当在私聊中时
+#             if privateConversations[userID]:
+#                 await CreateConversationWithPrompt.finish("已存在一个对话,请先删除")
+#             else:
+#                 privateConversations[userID] = Conversation.CreateWithStr(
+#                     customPrompt, userID)
+#                 await CreateConversationWithPrompt.finish(f"用户{str(userID)}创建成功")
+#     else:  # 若prompt全为空
+#         await CreateConversationWithPrompt.finish("输入prompt不能为空格!")
 
 
-@CreateConversationWithTemplate.handle()
-async def CreateConversation(event: Event):
-    await CreateConversationWithTemplate.send("请选择模板:\n" +
-                                              "1.普通ChatGPT\n" +
-                                              "2.猫娘\n", at_sender=True)
+# @CreateConversationWithTemplate.handle()
+# async def CreateConversation(event: Event):
+#     await CreateConversationWithTemplate.send("请选择模板:\n" +
+#                                               "1.普通ChatGPT\n" +
+#                                               "2.猫娘\n", at_sender=True)
 
 # 暂时完成
 
 
-@CreateConversationWithTemplate.got(key="template")
-async def Create(event: Event, id: str = ArgPlainText("template")):
+@Delete.handle()
+async def _(event: Event):
+    msg = event.get_plaintext()
+    msg = re.sub(r"^/chat\s+delete\s+", '', msg)
+    id = int(msg)
+    if isinstance(event, GroupMessageEvent):
+        groupPanel = groupPanels.get(event.group_id)
+        if not groupPanel:
+            await Join.finish("本群尚未创建过对话!", at_sender=True)
+        if id < 1 or id > len(groupPanel.conversations):
+            await Join.finish("序号超出!", at_sender=True)
+        userId = event.get_user_id()
+
+        # 删除对话
+        print("删除对话")
+        conver = groupPanel.conversations[id-1]
+        jointUser: List[int] = []
+        for user, conversation in groupPanel.userInConversation.items():
+            if conver == conversation:
+                jointUser.append(user)
+        for user in jointUser:
+            groupPanel.userInConversation.pop(user)
+
+        groupPanel.conversations.pop(id-1)
+        await Delete.finish("删除成功!")
+
+    else:
+        privateConversations.pop(event.get_user_id())
+        await Delete.finish("已删除当前对话")
+
+
+@CreateConversationWithTemplate.handle()
+async def Create(event: Event):
     ifGroup = True
     userId = event.get_user_id()
+    if_delete = ""
     if isinstance(event, PrivateMessageEvent):
         ifGroup = False
         if privateConversations.get(userId):
-            await CreateConversationWithTemplate.finish("已存在一个对话，请先删除该对话!")
-    if not id.isdigit():
-        await CreateConversationWithTemplate.reject("输入ID无效!")
+            try:
+                privateConversations.pop(event.get_user_id())
+                if_delete = "且已删除上次的上下文环境!"
+            except:
+                print("空私有对话")
+            # await CreateConversationWithTemplate.send("已删除上次的上下文环境")
+    else:
+        # 群组中
+        groupPanel = groupPanels.get(event.group_id)
+        try:
+            for user, conversation in groupPanel.userInConversation.items():
+                if user == userId:
+                    groupPanel.userInConversation.pop(user)
+                    if_delete = "且已删除上次的上下文环境!"
+        except:
+            print("空群组对话")
+    # if not id.isdigit():
+    #     await CreateConversationWithTemplate.reject("输入ID无效!")
     newConversation = None
+    print(groupPanels, privateConversations)
     try:
-        newConversation = Conversation.CreateWithTemplate(id, userId)
+        newConversation = Conversation.CreateWithTemplate("1", userId)
     except NoApiKeyError:
         await CreateConversationWithTemplate.finish("请机器人管理员在设置中添加APIKEY！")
     except Exception as e:
-        logger.error(str(e))
-    if int(id) == 1:
-        if newConversation is not None:
-            await CreateConversationWithTemplate.send("创建普通模板成功!", at_sender=True)
-    elif int(id) == 2:
-        if newConversation is not None:
-            await CreateConversationWithTemplate.send("创建猫娘模板成功!", at_sender=True)
-    elif int(id) == 3:
-        if newConversation is not None:
-            await CreateConversationWithTemplate.send("创建诺拉模板成功!", at_sender=True)
-    else:
-        await CreateConversationWithTemplate.finish("不存在该序号!")
+        print(e)
+
+    print("创建成功", newConversation)
+    print(newConversation is not None)
+
+    if newConversation is not None:
+        await CreateConversationWithTemplate.send("创建上下文成功!"+if_delete, at_sender=True)
+
     if ifGroup:
         if not groupPanels.get(event.group_id):
             groupPanels[event.group_id] = GroupPanel()
